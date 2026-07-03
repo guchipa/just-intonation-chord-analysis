@@ -1,6 +1,6 @@
 import { getJustFrequencies } from "./calcJustFreq";
 import { quadraticInterpolation } from "./peakInterpolation";
-import type { Pitch } from "@/lib/types";
+import type { Pitch } from "../types";
 
 /**
  * 演奏された音の評価結果

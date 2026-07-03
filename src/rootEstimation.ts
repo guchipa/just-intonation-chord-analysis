@@ -2,9 +2,9 @@ import {
   PITCH_CLASSES,
   CHORD_DEFINITIONS,
   PITCH_NAME_LIST,
-} from "@/lib/constants";
+} from "../constants";
 
-import type { Pitch } from "@/lib/types";
+import type { Pitch } from "../types";
 
 /**
  * 現在登録されている音リストを元にルート音を推定する

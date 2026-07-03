@@ -1,6 +1,6 @@
 import { vi } from "vitest";
-import { estimateRoot } from "@/lib/audio_analysis/rootEstimation";
-import type { Pitch } from "@/lib/schema";
+import { estimateRoot } from "../../src/audio_analysis/rootEstimation";
+import type { Pitch } from "../../src/types";
 
 describe("rootEstimation", () => {
   describe("estimateRoot", () => {
