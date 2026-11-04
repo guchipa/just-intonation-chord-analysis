@@ -1,6 +1,6 @@
 import { getJustFrequencies } from "./calcJustFreq";
 import { quadraticInterpolation } from "./peakInterpolation";
-import type { Pitch } from "../types";
+import type { Pitch } from "./types";
 
 /**
  * 演奏された音の評価結果
@@ -11,7 +11,7 @@ export interface EvaluationResult {
   /** セント単位の誤差（生の値） */
   centDeviation: number | null;
 
-  /** 実験モード向け: ピーク探索範囲デバッグ情報 */
+  /** デバッグ用: ピーク探索範囲の情報 (options.includeDebug 指定時のみ) */
   debug?: {
     estFreqHz: number;
     range: {

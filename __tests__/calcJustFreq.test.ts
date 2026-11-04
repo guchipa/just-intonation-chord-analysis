@@ -1,5 +1,5 @@
-import { getJustFrequencies, getEqualJustDiff } from "../../src/audio_analysis/calcJustFreq";
-import type { Pitch } from "../../src/types";
+import { getJustFrequencies, getEqualJustDiff } from "../src/calcJustFreq";
+import type { Pitch } from "../src/types";
 
 describe("calcJustFreq", () => {
   const A4_FREQ = 440;

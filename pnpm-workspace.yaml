@@ -1,0 +1,3 @@
+# esbuild は install スクリプトでプラットフォーム別バイナリを取得するため許可する (vitest に必須)
+allowBuilds:
+  esbuild: true

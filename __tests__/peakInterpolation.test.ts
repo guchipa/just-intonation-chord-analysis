@@ -2,7 +2,7 @@ import {
     quadraticInterpolation,
     spectralCentroid,
     estimatePeakFrequency,
-} from "../../src/audio_analysis/peakInterpolation";
+} from "../src/peakInterpolation";
 
 describe("quadraticInterpolation", () => {
     test("理想的なパラボラ形状で正確に補間（対称）", () => {

@@ -1,0 +1,24 @@
+{
+  "name": "@chordlens/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Just-intonation deviation analysis for ensemble chord practice (APSIPA ASC 2026).",
+  "license": "MIT",
+  "author": "Hinata Moriguchi",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^3.25.67"
+  },
+  "devDependencies": {
+    "typescript": "^5",
+    "vitest": "^3.2.4"
+  }
+}

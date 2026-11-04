@@ -1,5 +1,5 @@
-import { evaluateSpectrum } from "../../src/audio_analysis/justAnalyze";
-import type { Pitch } from "../../src/types";
+import { evaluateSpectrum } from "../src/justAnalyze";
+import type { Pitch } from "../src/types";
 
 /**
  * テスト用ヘルパー: 等間隔の周波数ビン配列を生成

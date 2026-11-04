@@ -1,5 +1,5 @@
-import { OCTAVE_NUM_LIST, PITCH_NAME_LIST, JUST_RATIOS } from "../constants";
-import type { Pitch } from "../types";
+import { OCTAVE_NUM_LIST, PITCH_NAME_LIST, JUST_RATIOS } from "./constants";
+import type { Pitch } from "./types";
 
 /**
  * 音名とオクターブ番号から半音インデックスを計算する
