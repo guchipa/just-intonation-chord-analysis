@@ -15,9 +15,13 @@ preferred-citation:
     - family-names: Moriguchi
       given-names: Hinata
     - family-names: Sawada
+      given-names: Shun
     - family-names: Higuchi
+      given-names: Kohki
     - family-names: Katsurada
+      given-names: Kouichi
     - family-names: Ohmura
+      given-names: Hidefumi
   collection-title: "Proceedings of the Asia-Pacific Signal and Information Processing Association Annual Summit and Conference (APSIPA ASC 2026)"
   conference:
     name: "APSIPA ASC 2026"
