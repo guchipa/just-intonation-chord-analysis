@@ -1,4 +1,4 @@
-# chordlens-core
+# Just Intonation Chord Analysis
 
 Reference implementation of the acoustic analysis described in
 
