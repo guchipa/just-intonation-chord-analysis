@@ -4,6 +4,12 @@
  */
 
 /**
+ * A4 の周波数（Hz）
+ * 平均律の基準として用いる
+ */
+export const A4_FREQ = 442;
+
+/**
  * 解析対象とする音名のリスト
  */
 export const PITCH_NAME_LIST: string[] = [
