@@ -1,0 +1,10 @@
+{
+  // テスト・評価 CLI を含めた型検査 (Node.js 上で動くもの)
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node", "vitest/globals"]
+  },
+  "include": ["src/**/*", "__tests__/**/*", "scripts/**/*", "vitest.config.ts"],
+  // ambient.d.ts の console 宣言は @types/node と衝突するため除外
+  "exclude": ["src/ambient.d.ts"]
+}

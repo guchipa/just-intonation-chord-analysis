@@ -1,3 +1,5 @@
-# esbuild は install スクリプトでプラットフォーム別バイナリを取得するため許可する (vitest に必須)
+# esbuild は install スクリプトでプラットフォーム別バイナリを取得するため許可する (vitest・tsx に必須)
+# ffmpeg-static は install スクリプトで ffmpeg バイナリを取得するため許可する (評価 CLI の音声デコードに必須)
 allowBuilds:
   esbuild: true
+  ffmpeg-static: true

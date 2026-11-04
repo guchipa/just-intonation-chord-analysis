@@ -1,9 +1,10 @@
 {
+  // src 専用の型検査。DOM lib と @types/node を意図的に含めない
+  // (ブラウザ API・Node.js API に依存しないことを型検査で保証する)
   "compilerOptions": {
     "target": "ES2022",
-    // DOM lib を意図的に含めない (ブラウザ API に依存しないことを型検査で保証する)
     "lib": ["ES2022"],
-    "types": ["vitest/globals"],
+    "types": [],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "strict": true,
@@ -13,5 +14,5 @@
     "isolatedModules": true,
     "resolveJsonModule": true
   },
-  "include": ["src/**/*", "__tests__/**/*", "vitest.config.ts"]
+  "include": ["src/**/*"]
 }
