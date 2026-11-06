@@ -78,9 +78,9 @@ dB-scaled, Blackman-windowed spectrum and matching bin frequencies.
 ## Usage
 
 ```ts
-import { estimateRoot } from "@chordlens/core/rootEstimation";
-import { evaluateSpectrum } from "@chordlens/core/justAnalyze";
-import type { Pitch } from "@chordlens/core/types";
+import { estimateRoot } from "just-intonation-chord-analysis/rootEstimation";
+import { evaluateSpectrum } from "just-intonation-chord-analysis/justAnalyze";
+import type { Pitch } from "just-intonation-chord-analysis/types";
 
 const sampleRate = 48000;
 const fftSize = 32768;
@@ -209,9 +209,9 @@ wind-instrument ensembles. The recordings are not included in this repository.
 import {
   HarmonicNoteDetector,
   NOTE_DETECTION_ESTIMATION_OPTIONS,
-} from "@chordlens/core/chord_detection/noteDetection";
-import { noteEventsToPitchList } from "@chordlens/core/chord_detection/chordToneEstimation";
-import { StreamingChordTracker } from "@chordlens/core/chord_detection/streamingChordTracker";
+} from "just-intonation-chord-analysis/chord_detection/noteDetection";
+import { noteEventsToPitchList } from "just-intonation-chord-analysis/chord_detection/chordToneEstimation";
+import { StreamingChordTracker } from "just-intonation-chord-analysis/chord_detection/streamingChordTracker";
 
 const sampleRate = 48000; // pass the actual capture rate
 const detector = new HarmonicNoteDetector({ sampleRate });

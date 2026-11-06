@@ -21,7 +21,7 @@
  * 実装は ./lib/spectralAttenuation.ts
  *
  * 使い方:
- *   pnpm --filter @chordlens/core eval:chords <dir-or-files...>
+ *   pnpm eval:chords <dir-or-files...>
  *     [--root-optional] [--sample-rate <hz>] [--a4 <hz>] [--attenuate <dB>]
  *     [--window-seconds <sec>] [--verbose]
  */
@@ -30,7 +30,7 @@ import { runChordEvalMain } from "./lib/chordEvalCli";
 
 runChordEvalMain(
   process.argv,
-  "Usage: pnpm --filter @chordlens/core eval:chords <dir-or-files...> " +
+  "Usage: pnpm eval:chords <dir-or-files...> " +
     "[--root-optional] [--sample-rate <hz>] [--a4 <hz>] [--attenuate <dB>] " +
     "[--window-seconds <sec>] [--verbose]"
 );

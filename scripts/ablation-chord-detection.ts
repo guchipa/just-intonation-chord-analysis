@@ -19,7 +19,7 @@
  * 正解ラベル (MIDI ノート番号) は変わらないため採点はそのまま使える。
  *
  * 使い方:
- *   pnpm --filter @chordlens/core eval:ablation <dir-or-files...>
+ *   pnpm eval:ablation <dir-or-files...>
  *     [--root-optional] [--sample-rate <hz>] [--a4 <hz>]
  *     [--conditions <id,...>] [--variants <id,...>]
  */
@@ -143,7 +143,7 @@ interface ParsedArgs {
 function parseArgs(argv: string[]): ParsedArgs {
   const args = argv.slice(2);
   const usage =
-    "Usage: pnpm --filter @chordlens/core eval:ablation <dir-or-files...> " +
+    "Usage: pnpm eval:ablation <dir-or-files...> " +
     "[--root-optional] [--sample-rate <hz>] [--a4 <hz>] " +
     "[--conditions <id,...>] [--variants <id,...>]";
   if (args.length === 0 || args.includes("-h") || args.includes("--help")) {
