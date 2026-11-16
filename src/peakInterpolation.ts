@@ -3,22 +3,32 @@
  * FFTの周波数分解能の限界を補間技術で克服するためのユーティリティ
  */
 
+import {
+    INTERPOLATION_MODE_DEFAULT,
+    type InterpolationMode,
+} from "./constants";
+
+export type { InterpolationMode };
+
 /**
  * パラボラ補間でサブビン精度の周波数を推定
- * 
+ *
  * 最大ピーク周辺の3点（左隣、ピーク、右隣）から放物線を当てはめ、
  * 真のピーク位置を推定する。音響処理で広く使われる標準的手法。
  * dB単位のスペクトルに対応（getFloatFrequencyData の結果）
- * 
+ *
  * @param spec スペクトル配列（dB単位）- getFloatFrequencyData() の結果を想定
  * @param peakIdx 最大値のインデックス
  * @param freq 周波数配列
+ * @param mode 放物線を当てる振幅の尺度。"db" (既定) は dB 値のまま、
+ *   "linear" は線形振幅に変換してから補間する (見直し前の方式)
  * @returns 補間された周波数。補間できない場合はビンの周波数をそのまま返す
  */
 export function quadraticInterpolation(
     spec: Float32Array,
     peakIdx: number,
-    freq: number[]
+    freq: number[],
+    mode: InterpolationMode = INTERPOLATION_MODE_DEFAULT
 ): number {
     // 境界チェック：両隣が存在しない場合は補間不可
     if (peakIdx <= 0 || peakIdx >= spec.length - 1) {
@@ -26,33 +36,38 @@ export function quadraticInterpolation(
     }
 
     // 3点のdB値を取得
-    const alpha = spec[peakIdx - 1];
-    const beta = spec[peakIdx];
-    const gamma = spec[peakIdx + 1];
+    const alphaDb = spec[peakIdx - 1];
+    const betaDb = spec[peakIdx];
+    const gammaDb = spec[peakIdx + 1];
 
     // ピークが明確でない場合は補間をスキップ
     // （例：平坦、または両隣の方が大きい）
-    if (beta <= alpha || beta <= gamma) {
+    if (betaDb <= alphaDb || betaDb <= gammaDb) {
         return freq[peakIdx];
     }
 
-    // dB値を線形振幅に変換してからパラボラ補間を実行
-    // A_dB = 20 * log10(A_linear) ⟹ A_linear = 10^(A_dB / 20)
-    const alphaLinear = Math.pow(10, alpha / 20);
-    const betaLinear = Math.pow(10, beta / 20);
-    const gammaLinear = Math.pow(10, gamma / 20);
+    // "db": dB 値 (対数振幅) のまま補間する。
+    // "linear": dB値を線形振幅に変換してから補間する
+    //   A_dB = 20 * log10(A_linear) ⟹ A_linear = 10^(A_dB / 20)
+    const alpha = mode === "linear" ? Math.pow(10, alphaDb / 20) : alphaDb;
+    const beta = mode === "linear" ? Math.pow(10, betaDb / 20) : betaDb;
+    const gamma = mode === "linear" ? Math.pow(10, gammaDb / 20) : gammaDb;
 
     // パラボラ補間の公式: δ = 0.5 * (α - γ) / (α - 2β + γ)
     // δ は -0.5 〜 +0.5 の範囲のビンオフセット
-    // 線形振幅値に対して補間を行う
-    const denominator = alphaLinear - 2 * betaLinear + gammaLinear;
+    const denominator = alpha - 2 * beta + gamma;
 
     // 分母が0に近い場合（ほぼ平坦）は補間をスキップ
     if (Math.abs(denominator) < 1e-10) {
         return freq[peakIdx];
     }
 
-    const delta = 0.5 * (alphaLinear - gammaLinear) / denominator;
+    const delta = 0.5 * (alpha - gamma) / denominator;
+
+    // "db" では隣のビンが -Infinity (振幅 0) だと δ が NaN になるため補間しない
+    if (mode === "db" && !Number.isFinite(delta)) {
+        return freq[peakIdx];
+    }
 
     // δ が範囲外の場合は補間失敗とみなす
     if (Math.abs(delta) > 0.5) {
@@ -133,6 +148,7 @@ export type InterpolationMethod = 'none' | 'parabolic' | 'centroid';
  * @param evalRangeMin 評価範囲の開始インデックス（centroid用）
  * @param evalRangeMax 評価範囲の終了インデックス（centroid用）
  * @param topN 重心法で使用する上位ビン数
+ * @param interpolationMode パラボラ補間の振幅の尺度 (parabolic用)
  * @returns 推定された周波数
  */
 export function estimatePeakFrequency(
@@ -142,11 +158,12 @@ export function estimatePeakFrequency(
     freq: number[],
     evalRangeMin?: number,
     evalRangeMax?: number,
-    topN: number = 3
+    topN: number = 3,
+    interpolationMode: InterpolationMode = INTERPOLATION_MODE_DEFAULT
 ): number {
     switch (method) {
         case 'parabolic':
-            return quadraticInterpolation(spec, peakIdx, freq);
+            return quadraticInterpolation(spec, peakIdx, freq, interpolationMode);
 
         case 'centroid':
             if (evalRangeMin !== undefined && evalRangeMax !== undefined) {

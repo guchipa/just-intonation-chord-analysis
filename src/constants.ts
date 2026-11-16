@@ -145,3 +145,14 @@ export const EVAL_MARGIN_DB_DEFAULT = 15;
  * 100 セント = 半音。これより離れた成分は別の音とみなす
  */
 export const OUT_OF_RANGE_GUARD_CENTS = 100;
+
+/**
+ * パラボラ補間 (quadraticInterpolation) をどの尺度の振幅で行うか。
+ * - "db": dB 値 (対数振幅) のまま 3 点に放物線を当てる。窓関数の主ローブは対数振幅で
+ *   放物線に近く、AnalyserNode の Blackman 窓ではこちらの偏りが小さい
+ * - "linear": dB を線形振幅に戻してから当てる (見直し前の方式)。ピークがビンの中間に
+ *   あるほど偏りが大きく、周波数ごとに符号の違う系統誤差が出る
+ */
+export const INTERPOLATION_MODES = ["db", "linear"] as const;
+export type InterpolationMode = (typeof INTERPOLATION_MODES)[number];
+export const INTERPOLATION_MODE_DEFAULT: InterpolationMode = "db";

@@ -1,12 +1,16 @@
 import { getJustFrequencies } from "./calcJustFreq";
 import {
   EVAL_MARGIN_DB_DEFAULT,
+  INTERPOLATION_MODE_DEFAULT,
   MAIN_LOBE_HALF_WIDTH_BINS,
   NOISE_FLOOR_MIN_BINS,
   NOISE_FLOOR_RANGE_SEMITONES,
   OUT_OF_RANGE_GUARD_CENTS,
 } from "./constants";
-import { quadraticInterpolation } from "./peakInterpolation";
+import {
+  quadraticInterpolation,
+  type InterpolationMode,
+} from "./peakInterpolation";
 import type { Pitch } from "./types";
 
 /**
@@ -71,6 +75,11 @@ export interface EvaluateSpectrumOptions {
    * でも null にせず窓内の最大ビンから値を出す
    */
   evalMarginDb?: number | null;
+  /**
+   * ピーク周波数のパラボラ補間をどの尺度の振幅で行うか。
+   * 省略時は INTERPOLATION_MODE_DEFAULT ("db")。"linear" は見直し前の方式
+   */
+  interpolationMode?: InterpolationMode;
 }
 
 /** 中央値計算の作業用バッファ (毎フレームの確保を避けるため使い回す) */
@@ -300,6 +309,9 @@ export function evaluateSpectrum(
       ? EVAL_MARGIN_DB_DEFAULT
       : options.evalMarginDb;
 
+  const interpolationMode =
+    options.interpolationMode ?? INTERPOLATION_MODE_DEFAULT;
+
   // ノイズフロア推定から除くビン範囲 (計測対象外の音も鳴っている前提で含める)
   const toneBinRanges = buildToneBinRanges(estFreqs, freq, evalRangeCents);
 
@@ -412,7 +424,12 @@ export function evaluateSpectrum(
     const isDetected = !(maxVal < evalThreshold) && !(maxVal < marginFloorDb);
 
     // 実際の周波数を計算（パラボラ補間でサブビン精度の周波数を推定）
-    const actualFreq = quadraticInterpolation(spec, peakIdx, freq);
+    const actualFreq = quadraticInterpolation(
+      spec,
+      peakIdx,
+      freq,
+      interpolationMode
+    );
 
     // 範囲内判定: 最大ビンがスペクトル全体で局所最大 (両隣より大きい) で、
     // かつ補間後の周波数が探索窓に収まること。

@@ -1,7 +1,4 @@
-import { evaluateSpectrum } from "../src/justAnalyze";
-import type { Pitch } from "../src/types";
-import { makeFreqBins, simulateAnalyserSpectrum } from "./helpers/analyserNodeSim";
-import { legacyEvaluateSpectrum } from "./helpers/legacyEvaluateSpectrum";
+import { simulateAnalyserSpectrum } from "./helpers/analyserNodeSim";
 
 /**
  * AnalyserNode 再現ヘルパー自体の検証。
@@ -64,36 +61,5 @@ describe("simulateAnalyserSpectrum (AnalyserNode 再現ヘルパー)", () => {
     const a = simulateAnalyserSpectrum(options);
     const b = simulateAnalyserSpectrum(options);
     expect(Array.from(a.subarray(0, 64))).toEqual(Array.from(b.subarray(0, 64)));
-  });
-});
-
-describe("legacyEvaluateSpectrum (旧実装の凍結コピー)", () => {
-  it("旧挙動に切り替えた evaluateSpectrum と同じ出力を返す", () => {
-    const freq = makeFreqBins(48000, 32768);
-    const pitchList: Pitch[] = [
-      { pitchName: "C", octaveNum: 4, isRoot: true, enabled: true },
-      { pitchName: "E", octaveNum: 4, isRoot: false, enabled: true },
-      { pitchName: "G", octaveNum: 4, isRoot: false, enabled: false },
-    ];
-    const spec = simulateAnalyserSpectrum({
-      sampleRate: 48000,
-      fftSize: 32768,
-      smoothingTimeConstant: 0.8,
-      tones: [
-        { freqHz: 263.5, peakDb: -40 },
-        { freqHz: 330.2, peakDb: -45 },
-      ],
-      noiseFloorDb: -90,
-    });
-    const current = evaluateSpectrum(spec, freq, pitchList, 50, 442, -100, {
-      evalMarginDb: null,
-    });
-    const legacy = legacyEvaluateSpectrum(spec, freq, pitchList, 50, 442, -100);
-    expect(legacy).toEqual(
-      current.map((r) => ({
-        deviation: r.deviation,
-        centDeviation: r.centDeviation,
-      }))
-    );
   });
 });

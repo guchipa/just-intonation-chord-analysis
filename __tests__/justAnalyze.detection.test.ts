@@ -166,7 +166,6 @@ describe("evaluateSpectrum: ノイズフロア基準の検出判定 (evalMarginD
       );
       const result = evaluate(spec, triad, { evalMarginDb: null });
       if (result[1].centDeviation !== null) detected++;
-      expect(result[1].centDeviation).toBe(legacy(spec, triad)[1].centDeviation);
     }
     // ノイズフロア -90 dB はしきい値 -100 dB より高いので、ノイズを拾って必ず値が出る
     expect(detected).toBe(SEEDS.length);
@@ -375,5 +374,205 @@ describe("evaluateSpectrum: 探索窓の外にずれた音 (isOutOfRange)", () =
     expect(result.centDeviation!).toBeGreaterThan(40);
     expect(result.centDeviation!).toBeLessThan(51);
     expect(result.isOutOfRange).toBe(true);
+  });
+});
+
+describe("evaluateSpectrum: 補間方式 (interpolationMode)", () => {
+  /** 98 Hz (G2) 以上の音。A4 = 442 Hz */
+  const NOTES: [string, number][] = [
+    ["G", 2],
+    ["Bb", 2],
+    ["C", 3],
+    ["G", 3],
+    ["Bb", 3],
+    ["C", 4],
+    ["E", 4],
+    ["A", 4],
+    ["C", 5],
+    ["G", 5],
+    ["C", 6],
+  ];
+  const DETUNES = [-40, -30, -20, -10, 0, 10, 20, 30, 40];
+
+  /** 単音を各ずれで鳴らしたときの |推定値 - 真値| の最大 (不検出があれば Infinity) */
+  const maxError = (
+    name: string,
+    octave: number,
+    noiseFloorDb: number | null,
+    options?: EvaluateSpectrumOptions
+  ): number => {
+    const list = [pitch(name, octave, true)];
+    const [f0] = getJustFrequencies(list, A4);
+    let max = 0;
+    for (const cents of DETUNES) {
+      const spec = simulate(
+        [{ freqHz: detune(f0, cents), peakDb: TONE_DB }],
+        1000 + cents,
+        noiseFloorDb
+      );
+      const result = evaluate(spec, list, options)[0];
+      if (result.centDeviation === null) return Infinity;
+      max = Math.max(max, Math.abs(result.centDeviation - cents));
+    }
+    return max;
+  };
+
+  it("既定 ('db'): -40 dB の正弦波 + ノイズフロア -90 dB を全音域・±40 セントで検出する", () => {
+    for (const [name, octave] of NOTES) {
+      expect(maxError(name, octave, NOISE_DB)).toBeLessThan(Infinity);
+    }
+  });
+
+  it("既定 ('db'): 98 Hz 以上・ずれ ±40 セント以内の補間誤差は 0.2 セント以下 (ノイズなし)", () => {
+    for (const [name, octave] of NOTES) {
+      expect(maxError(name, octave, null)).toBeLessThanOrEqual(0.2);
+    }
+  });
+
+  it("既定 ('db'): ノイズフロア -90 dB でも C4 以上は 0.2 セント以下、98 Hz 以上は 0.35 セント以下", () => {
+    // ノイズによるばらつきはビン幅 (セント) に比例するため、低音ほど大きい
+    for (const [name, octave] of NOTES) {
+      const [f0] = getJustFrequencies([pitch(name, octave, true)], A4);
+      expect(maxError(name, octave, NOISE_DB)).toBeLessThanOrEqual(f0 >= 262 ? 0.2 : 0.35);
+    }
+  });
+
+  it("'linear' (見直し前) は低音域で 0.9 セントを超える偏りが出る", () => {
+    expect(maxError("G", 2, null, { interpolationMode: "linear" })).toBeGreaterThan(0.9);
+    expect(maxError("C", 3, null, { interpolationMode: "linear" })).toBeGreaterThan(0.8);
+    // 'db' は同じ条件で 1/5 以下
+    expect(maxError("G", 2, null, { interpolationMode: "db" })).toBeLessThan(0.2);
+  });
+
+  it("純正な和音の平均誤差は 'db' の方が 'linear' より小さい", () => {
+    const chords: Pitch[][] = [
+      [pitch("C", 4, true), pitch("E", 4), pitch("G", 4)],
+      [pitch("Bb", 3, true), pitch("D", 4), pitch("F", 4)],
+      [pitch("C", 3, true), pitch("G", 3), pitch("E", 4), pitch("Bb", 4)],
+    ];
+    const meanError = (mode: "db" | "linear"): number => {
+      let sum = 0;
+      let count = 0;
+      chords.forEach((list, chordIdx) => {
+        const freqs = getJustFrequencies(list, A4);
+        const offsets = list.map((_, i) => ((chordIdx * 7 + i * 11) % 31) - 15);
+        const spec = simulate(
+          freqs.map((f, i) => ({ freqHz: detune(f, offsets[i]), peakDb: TONE_DB })),
+          chordIdx + 1
+        );
+        evaluate(spec, list, { interpolationMode: mode }).forEach((r, i) => {
+          expect(r.centDeviation).not.toBeNull();
+          sum += Math.abs(r.centDeviation! - offsets[i]);
+          count++;
+        });
+      });
+      return sum / count;
+    };
+    const db = meanError("db");
+    expect(db).toBeLessThan(meanError("linear"));
+    expect(db).toBeLessThan(0.2);
+  });
+});
+
+describe("evaluateSpectrum: 旧挙動の再現 (interpolationMode='linear' かつ evalMarginDb=null)", () => {
+  const LEGACY: EvaluateSpectrumOptions = {
+    interpolationMode: "linear",
+    evalMarginDb: null,
+  };
+  const triad = [pitch("C", 4, true), pitch("E", 4), pitch("G", 4)];
+  const [c4, e4, g4] = getJustFrequencies(triad, A4);
+
+  /** deviation / centDeviation が旧実装と完全に一致することを確かめる */
+  const expectSameAsLegacy = (spec: Float32Array, list: Pitch[]) => {
+    const current = evaluate(spec, list, LEGACY).map((r) => ({
+      deviation: r.deviation,
+      centDeviation: r.centDeviation,
+    }));
+    expect(current).toEqual(legacy(spec, list));
+  };
+
+  it("鳴っている和音 (ずれあり) で一致する", () => {
+    for (let seed = 1; seed <= 5; seed++) {
+      const spec = simulate(
+        [
+          { freqHz: detune(c4, seed * 3), peakDb: TONE_DB },
+          { freqHz: detune(e4, -seed * 4), peakDb: TONE_DB - 10 },
+          { freqHz: detune(g4, seed * 7), peakDb: TONE_DB - 5 },
+        ],
+        seed
+      );
+      expectSameAsLegacy(spec, triad);
+    }
+  });
+
+  it("鳴っていない構成音・ノイズのみでも一致する (旧実装はノイズから値を出す)", () => {
+    for (let seed = 1; seed <= 5; seed++) {
+      const absent = simulate(
+        [
+          { freqHz: c4, peakDb: TONE_DB },
+          { freqHz: g4, peakDb: TONE_DB },
+        ],
+        seed
+      );
+      expectSameAsLegacy(absent, triad);
+      expect(evaluate(absent, triad, LEGACY)[1].centDeviation).not.toBeNull();
+      expectSameAsLegacy(simulate([], seed), triad);
+    }
+  });
+
+  it("探索窓の外にずれた音でも一致する (旧実装は窓の端付近の値を出す)", () => {
+    for (const cents of [-100, -70, -55, -50, -48, -45, 45, 48, 50, 55, 70, 100]) {
+      const spec = simulate([
+        { freqHz: detune(c4, cents), peakDb: TONE_DB },
+        { freqHz: detune(g4, -cents), peakDb: TONE_DB },
+      ]);
+      expectSameAsLegacy(spec, triad);
+    }
+  });
+
+  it("絶対値のしきい値未満・計測対象外・低音域・fftSize が小さい場合でも一致する", () => {
+    // しきい値未満 (ノイズなし・-110 dB)
+    expectSameAsLegacy(simulate([{ freqHz: c4, peakDb: -110 }], 1, null), triad);
+
+    // 計測対象外を含む
+    const withDisabled = [triad[0], { ...triad[1], enabled: false }, triad[2]];
+    expectSameAsLegacy(simulate([{ freqHz: c4, peakDb: TONE_DB }]), withDisabled);
+
+    // 低音域 (探索窓が 2〜3 ビン)
+    const low = [pitch("C", 2, true), pitch("G", 2), pitch("E", 3)];
+    const lowFreqs = getJustFrequencies(low, A4);
+    expectSameAsLegacy(
+      simulate(lowFreqs.map((f, i) => ({ freqHz: detune(f, i * 17 - 20), peakDb: TONE_DB }))),
+      low
+    );
+
+    // fftSize 4096
+    const smallFreq = makeFreqBins(SAMPLE_RATE, 4096);
+    const smallSpec = simulateAnalyserSpectrum({
+      sampleRate: SAMPLE_RATE,
+      fftSize: 4096,
+      smoothingTimeConstant: SMOOTHING,
+      tones: [
+        { freqHz: detune(c4, 20), peakDb: TONE_DB },
+        { freqHz: detune(g4, -30), peakDb: TONE_DB },
+      ],
+      noiseFloorDb: NOISE_DB,
+    });
+    expect(
+      evaluateSpectrum(smallSpec, smallFreq, triad, EVAL_RANGE_CENTS, A4, EVAL_THRESHOLD, LEGACY).map(
+        (r) => ({ deviation: r.deviation, centDeviation: r.centDeviation })
+      )
+    ).toEqual(
+      legacyEvaluateSpectrum(smallSpec, smallFreq, triad, EVAL_RANGE_CENTS, A4, EVAL_THRESHOLD)
+    );
+  });
+
+  it("既定のオプションでは旧実装と異なる (鳴っていない音を null にする)", () => {
+    const spec = simulate([
+      { freqHz: c4, peakDb: TONE_DB },
+      { freqHz: g4, peakDb: TONE_DB },
+    ]);
+    expect(legacy(spec, triad)[1].centDeviation).not.toBeNull();
+    expect(evaluate(spec, triad)[1].centDeviation).toBeNull();
   });
 });

@@ -3,6 +3,8 @@ import {
     spectralCentroid,
     estimatePeakFrequency,
 } from "../src/peakInterpolation";
+import { INTERPOLATION_MODE_DEFAULT } from "../src/constants";
+import { legacyQuadraticInterpolation } from "./helpers/legacyEvaluateSpectrum";
 
 describe("quadraticInterpolation", () => {
     test("理想的なパラボラ形状で正確に補間（対称）", () => {
@@ -86,6 +88,68 @@ describe("quadraticInterpolation", () => {
 
         // ピークでないので補間しない
         expect(result).toBe(110);
+    });
+});
+
+describe("quadraticInterpolation: 補間モード (db / linear)", () => {
+    const freq = [100, 110, 120];
+    const spec = new Float32Array([-12, 0, -4]);
+
+    test("既定は 'db' (dB 値のまま補間する)", () => {
+        // δ = 0.5 * (α - γ) / (α - 2β + γ) = 0.5 * (-12 - -4) / (-12 - 0 + -4) = 0.25
+        expect(INTERPOLATION_MODE_DEFAULT).toBe("db");
+        expect(quadraticInterpolation(spec, 1, freq)).toBeCloseTo(112.5, 10);
+        expect(quadraticInterpolation(spec, 1, freq, "db")).toBeCloseTo(112.5, 10);
+    });
+
+    test("'linear' は線形振幅に変換してから補間する (見直し前の方式)", () => {
+        const a = Math.pow(10, -12 / 20);
+        const g = Math.pow(10, -4 / 20);
+        const delta = (0.5 * (a - g)) / (a - 2 + g);
+        expect(quadraticInterpolation(spec, 1, freq, "linear")).toBeCloseTo(110 + delta * 10, 10);
+        // 2 つのモードは別の値になる
+        expect(quadraticInterpolation(spec, 1, freq, "linear")).not.toBeCloseTo(112.5, 1);
+    });
+
+    test("'linear' は旧実装と完全に一致する", () => {
+        const cases: number[][] = [
+            [-12, 0, -4],
+            [-4, 0, -12],
+            [-6, 0, -6],
+            [-41.3, -40.2, -47.9],
+            [-90, -40, -90],
+            [-40.001, -40, -40.002],
+            [0, 0, 0],
+            [0, -3, 0],
+            [-Infinity, -40, -50],
+        ];
+        for (const values of cases) {
+            const s = new Float32Array(values);
+            expect(quadraticInterpolation(s, 1, freq, "linear")).toBe(
+                legacyQuadraticInterpolation(s, 1, freq)
+            );
+        }
+    });
+
+    test("ガウス形の主ローブ (dB で放物線) は 'db' で誤差なく補間できる", () => {
+        const f = [0, 10, 20, 30, 40];
+        const truePeak = 23.7;
+        const s = new Float32Array(f.map((x) => -3 * ((x - truePeak) / 10) ** 2));
+        expect(quadraticInterpolation(s, 2, f, "db")).toBeCloseTo(truePeak, 4);
+        expect(Math.abs(quadraticInterpolation(s, 2, f, "linear") - truePeak)).toBeGreaterThan(0.05);
+    });
+
+    test("'db' で隣のビンが -Infinity のときは補間しない (NaN を返さない)", () => {
+        expect(quadraticInterpolation(new Float32Array([-Infinity, -40, -50]), 1, freq)).toBe(110);
+        expect(quadraticInterpolation(new Float32Array([-50, -40, -Infinity]), 1, freq)).toBe(110);
+        expect(quadraticInterpolation(new Float32Array([-Infinity, -40, -Infinity]), 1, freq)).toBe(110);
+    });
+
+    test("estimatePeakFrequency の 'parabolic' にも補間モードを渡せる", () => {
+        expect(estimatePeakFrequency("parabolic", spec, 1, freq)).toBeCloseTo(112.5, 10);
+        expect(
+            estimatePeakFrequency("parabolic", spec, 1, freq, undefined, undefined, 3, "linear")
+        ).toBe(legacyQuadraticInterpolation(spec, 1, freq));
     });
 });
 
