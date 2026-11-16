@@ -4,6 +4,7 @@ import {
   MAIN_LOBE_HALF_WIDTH_BINS,
   NOISE_FLOOR_MIN_BINS,
   NOISE_FLOOR_RANGE_SEMITONES,
+  OUT_OF_RANGE_GUARD_CENTS,
 } from "./constants";
 import { quadraticInterpolation } from "./peakInterpolation";
 import type { Pitch } from "./types";
@@ -16,6 +17,17 @@ export interface EvaluationResult {
   deviation: number | null;
   /** セント単位の誤差（生の値） */
   centDeviation: number | null;
+
+  /**
+   * 探索窓 (±evalRangeCents) の外にずれた成分があるとき true。次のいずれか:
+   * - 探索窓内の最大ビンが検出判定を満たすが、スペクトル全体の局所最大でない
+   *   (窓の外にあるピークの裾)、または補間後の周波数が探索窓の外にある
+   * - 探索窓内は検出判定を満たさないが、窓の外側 ±OUT_OF_RANGE_GUARD_CENTS までに
+   *   検出判定を満たす成分がある
+   * このとき deviation / centDeviation は null (evalMarginDb=null のときは
+   * 見直し前と同じ値を出したまま、このフラグだけを立てる)
+   */
+  isOutOfRange: boolean;
 
   /**
    * 探索窓内の最大ビンのレベル (dB)。
@@ -52,8 +64,11 @@ export interface EvaluateSpectrumOptions {
    * 検出マージン (dB)。探索窓内のピークが「局所ノイズフロア + evalMarginDb」に
    * 満たないときは鳴っていないと判定して null を返す。
    * ノイズフロアを推定できないとき (noiseFloorDb=null) はこの判定を行わない。
-   * 省略時は EVAL_MARGIN_DB_DEFAULT。null を渡すとノイズフロア基準の判定を行わず、
-   * 絶対値のしきい値 (evalThreshold) だけで判定する (見直し前の挙動)
+   * 省略時は EVAL_MARGIN_DB_DEFAULT。
+   *
+   * null を渡すと検出判定を見直し前の挙動に戻す: ノイズフロア基準の判定を行わず
+   * 絶対値のしきい値 (evalThreshold) だけで判定し、探索窓の外にずれた成分 (isOutOfRange)
+   * でも null にせず窓内の最大ビンから値を出す
    */
   evalMarginDb?: number | null;
 }
@@ -201,6 +216,60 @@ export function estimateLocalNoiseFloorDb(
 }
 
 /**
+ * 探索窓の外側 (ガード帯) の最大レベル (dB) を返す。
+ *
+ * ガード帯は目標周波数 ±OUT_OF_RANGE_GUARD_CENTS のうち探索窓 [windowMin, windowMax) の
+ * 外にあるビン。ただし他の構成音の探索窓 + 主ローブ幅には踏み込まない
+ * (半音で隣り合う構成音を、この音が範囲外にずれたものと取り違えないため)。
+ *
+ * @returns ガード帯の最大 dB。ガード帯にビンがないときは -Infinity
+ */
+function maxInGuardBand(
+  spec: Float32Array,
+  freq: number[],
+  estFreqs: number[],
+  index: number,
+  evalRangeCents: number,
+  windowMin: number,
+  windowMax: number
+): number {
+  if (freq.length < 2) return -Infinity;
+  const freqStep = freq[1] - freq[0];
+  if (!(freqStep > 0)) return -Infinity;
+
+  const est = estFreqs[index];
+  const guardRatio = 2 ** (OUT_OF_RANGE_GUARD_CENTS / 1200);
+  const rangeRatio = 2 ** (evalRangeCents / 1200);
+  const lobeHz = MAIN_LOBE_HALF_WIDTH_BINS * freqStep;
+
+  let lowFreq = est / guardRatio;
+  let highFreq = est * guardRatio;
+  for (let j = 0; j < estFreqs.length; j++) {
+    const other = estFreqs[j];
+    if (other < est) {
+      lowFreq = Math.max(lowFreq, other * rangeRatio + lobeHz);
+    } else if (other > est) {
+      highFreq = Math.min(highFreq, other / rangeRatio - lobeHz);
+    }
+  }
+
+  const lo = Math.max(0, Math.ceil((lowFreq - freq[0]) / freqStep));
+  const hi = Math.min(
+    spec.length - 1,
+    Math.floor((highFreq - freq[0]) / freqStep)
+  );
+
+  let max = -Infinity;
+  for (let idx = lo; idx < windowMin; idx++) {
+    if (spec[idx] > max) max = spec[idx];
+  }
+  for (let idx = Math.max(windowMax, 0); idx <= hi; idx++) {
+    if (spec[idx] > max) max = spec[idx];
+  }
+  return max;
+}
+
+/**
  * 演奏された音の評価
  * @param spec 各周波数に対するスペクトル（強さ）- AnalyserNode.getFloatFrequencyData() の結果
  * @param freq 周波数ビン配列 - AnalyserNode から計算
@@ -245,6 +314,7 @@ export function evaluateSpectrum(
       evalList.push({
         deviation: null,
         centDeviation: null,
+        isOutOfRange: false,
         peakDb: null,
         noiseFloorDb: null,
       });
@@ -296,6 +366,7 @@ export function evaluateSpectrum(
       const base: EvaluationResult = {
         deviation: null,
         centDeviation: null,
+        isOutOfRange: false,
         peakDb: null,
         noiseFloorDb: null,
       };
@@ -334,23 +405,54 @@ export function evaluateSpectrum(
     );
 
     // 検出判定: 絶対値のしきい値と、ノイズフロア基準のマージンの両方を満たすこと
-    const passesThreshold = !(maxVal < evalThreshold);
-    const passesMargin =
-      evalMarginDb === null ||
-      noiseFloorDb === null ||
-      !(maxVal < noiseFloorDb + evalMarginDb);
+    const marginFloorDb =
+      evalMarginDb === null || noiseFloorDb === null
+        ? -Infinity
+        : noiseFloorDb + evalMarginDb;
+    const isDetected = !(maxVal < evalThreshold) && !(maxVal < marginFloorDb);
 
     // 実際の周波数を計算（パラボラ補間でサブビン精度の周波数を推定）
     const actualFreq = quadraticInterpolation(spec, peakIdx, freq);
 
+    // 範囲内判定: 最大ビンがスペクトル全体で局所最大 (両隣より大きい) で、
+    // かつ補間後の周波数が探索窓に収まること。
+    // 窓の外にずれた音は主ローブの裾が窓の端のビンを最大にするので、局所最大にならない
+    const isLocalPeak =
+      peakIdx > 0 &&
+      peakIdx < spec.length - 1 &&
+      maxVal > spec[peakIdx - 1] &&
+      maxVal > spec[peakIdx + 1];
+    const isPeakInRange =
+      isLocalPeak && actualFreq >= minFreq && actualFreq <= maxFreq;
+
+    let isOutOfRange: boolean;
+    if (isDetected) {
+      isOutOfRange = !isPeakInRange;
+    } else {
+      // 窓内は不検出。窓の外側 (ガード帯) に検出判定を満たす成分があれば範囲外とする
+      const guardMaxDb = maxInGuardBand(
+        spec,
+        freq,
+        estFreqs,
+        i,
+        evalRangeCents,
+        evalRangeMin,
+        evalRangeMax
+      );
+      isOutOfRange =
+        !(guardMaxDb < evalThreshold) && !(guardMaxDb < marginFloorDb);
+    }
+
     const result: EvaluationResult = {
       deviation: null,
       centDeviation: null,
+      isOutOfRange,
       peakDb: maxVal,
       noiseFloorDb,
     };
 
-    if (passesThreshold && passesMargin) {
+    // evalMarginDb=null (見直し前の検出判定) では範囲外でも値を出す
+    if (isDetected && (isPeakInRange || evalMarginDb === null)) {
       // セント単位の誤差を計算: cent = 1200 * log2(actual / expected)
       const centDeviation = 1200 * Math.log2(actualFreq / est_f);
 

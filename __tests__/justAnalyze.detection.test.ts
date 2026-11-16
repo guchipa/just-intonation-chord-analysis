@@ -263,11 +263,117 @@ describe("evaluateSpectrum: ノイズフロア基準の検出判定 (evalMarginD
   it("計測対象外 (enabled=false) の音は peakDb / noiseFloorDb も null", () => {
     const list = [pitch("C", 4, true), { ...pitch("E", 4), enabled: false }];
     const spec = simulate([{ freqHz: c4, peakDb: TONE_DB }]);
-    expect(evaluate(spec, list)[1]).toEqual({
+    expect(evaluate(spec, list)[1]).toMatchObject({
       deviation: null,
       centDeviation: null,
       peakDb: null,
       noiseFloorDb: null,
     });
+  });
+});
+
+describe("evaluateSpectrum: 探索窓の外にずれた音 (isOutOfRange)", () => {
+  const NOTES: [string, number][] = [
+    ["G", 2],
+    ["C", 3],
+    ["C", 4],
+    ["A", 4],
+    ["C", 6],
+  ];
+
+  /** 単音 (根音のみ) を cents セントずらして鳴らしたときの評価結果 */
+  const evaluateDetuned = (
+    name: string,
+    octave: number,
+    cents: number,
+    options?: EvaluateSpectrumOptions
+  ) => {
+    const list = [pitch(name, octave, true)];
+    const [f0] = getJustFrequencies(list, A4);
+    const spec = simulate([{ freqHz: detune(f0, cents), peakDb: TONE_DB }]);
+    return { result: evaluate(spec, list, options)[0], spec, list };
+  };
+
+  it.each(NOTES)("%s%i: +70 / -70 セントのずれは null かつ isOutOfRange=true", (name, octave) => {
+    for (const cents of [70, -70]) {
+      const { result } = evaluateDetuned(name, octave, cents);
+      expect(result.centDeviation).toBeNull();
+      expect(result.deviation).toBeNull();
+      expect(result.isOutOfRange).toBe(true);
+    }
+  });
+
+  it.each(NOTES)("%s%i: +45 セントのずれは誤差 3 セント以内で値を出す", (name, octave) => {
+    const { result } = evaluateDetuned(name, octave, 45);
+    expect(result.centDeviation).not.toBeNull();
+    expect(Math.abs(result.centDeviation! - 45)).toBeLessThanOrEqual(3);
+    expect(result.isOutOfRange).toBe(false);
+  });
+
+  it("窓の端のビンが最大でも、真のピークなら値を出す (C4 の ±40 セント)", () => {
+    // C4 の +40 セントは探索窓の最後のビンがピークになる
+    for (const cents of [40, -40]) {
+      const { result } = evaluateDetuned("C", 4, cents);
+      expect(result.centDeviation).not.toBeNull();
+      expect(Math.abs(result.centDeviation! - cents)).toBeLessThan(0.5);
+      expect(result.isOutOfRange).toBe(false);
+    }
+  });
+
+  it("探索窓の外 (52〜95 セント) では窓の端付近の値を出さない", () => {
+    for (const [name, octave] of [
+      ["C", 4],
+      ["A", 4],
+    ] as [string, number][]) {
+      for (const cents of [52, 55, 60, 65, 80, 95, -52, -55, -60, -65, -80, -95]) {
+        const { result } = evaluateDetuned(name, octave, cents);
+        expect(result.centDeviation).toBeNull();
+        expect(result.isOutOfRange).toBe(true);
+      }
+    }
+  });
+
+  it("範囲内の音・鳴っていない音は isOutOfRange=false", () => {
+    const triad = [pitch("C", 4, true), pitch("E", 4), pitch("G", 4)];
+    const [c4, , g4] = getJustFrequencies(triad, A4);
+    for (let seed = 1; seed <= 10; seed++) {
+      const spec = simulate(
+        [
+          { freqHz: detune(c4, 12), peakDb: TONE_DB },
+          { freqHz: detune(g4, -8), peakDb: TONE_DB },
+        ],
+        seed
+      );
+      const result = evaluate(spec, triad);
+      expect(result.map((r) => r.isOutOfRange)).toEqual([false, false, false]);
+      expect(result[1].centDeviation).toBeNull();
+    }
+  });
+
+  it("半音で隣り合う構成音を、鳴っていない音の範囲外ずれと取り違えない", () => {
+    // C メジャーセブンス (B3 と C4 が約 112 セント差)。B3 を鳴らさない
+    const maj7 = [pitch("C", 4, true), pitch("B", 3), pitch("E", 4), pitch("G", 4)];
+    const [c4, b3, e4, g4] = getJustFrequencies(maj7, A4);
+    expect(1200 * Math.log2(c4 / b3)).toBeCloseTo(111.7, 1);
+    // C4 が B3 側へ 10 セント低くても、C4 自身の探索窓の中なら B3 の範囲外にしない
+    const spec = simulate([
+      { freqHz: detune(c4, -10), peakDb: TONE_DB },
+      { freqHz: e4, peakDb: TONE_DB },
+      { freqHz: g4, peakDb: TONE_DB },
+    ]);
+    const result = evaluate(spec, maj7);
+    expect(result[1].centDeviation).toBeNull();
+    expect(result[1].isOutOfRange).toBe(false);
+    expect(result[0].centDeviation).toBeCloseTo(-10, 0);
+  });
+
+  it("evalMarginDb=null では範囲外でも旧実装と同じ値を出し、isOutOfRange だけ立てる", () => {
+    // +55 セント: 窓の端のビン (主ローブの裾) を拾って ±50 セント付近の値になる
+    const { spec, list } = evaluateDetuned("A", 4, 55);
+    const result = evaluate(spec, list, { evalMarginDb: null })[0];
+    expect(result.centDeviation).not.toBeNull();
+    expect(result.centDeviation!).toBeGreaterThan(40);
+    expect(result.centDeviation!).toBeLessThan(51);
+    expect(result.isOutOfRange).toBe(true);
   });
 });

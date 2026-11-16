@@ -137,3 +137,11 @@ export const MAIN_LOBE_HALF_WIDTH_BINS = 3;
  * 鳴っていない構成音にも偏差を出してしまうため、ノイズフロア基準の判定を併用する
  */
 export const EVAL_MARGIN_DB_DEFAULT = 15;
+
+/**
+ * 範囲外判定のガード帯 (セント)。
+ * 探索窓 (±evalRangeCents) の外側、目標周波数 ±この値までを調べ、検出判定を満たす成分が
+ * あれば「探索窓の外にずれて鳴っている」と判定する (isOutOfRange)。
+ * 100 セント = 半音。これより離れた成分は別の音とみなす
+ */
+export const OUT_OF_RANGE_GUARD_CENTS = 100;
