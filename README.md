@@ -18,6 +18,10 @@ It is **not part of the paper**; see [Chord tone detection](#chord-tone-detectio
 The code exactly as published with the paper is tagged
 [`APSIPA2026`](https://github.com/guchipa/just-intonation-chord-analysis/tree/APSIPA2026).
 
+After the paper, the detection decision and the interpolation of `evaluateSpectrum`
+were revised (see [Changes after the paper](#changes-after-the-paper)). The behaviour
+described in the paper is still available through options.
+
 ## Processing pipeline and correspondence to the paper
 
 Processing runs in this order (the JI target depends on the root, so root estimation runs first):
@@ -40,10 +44,14 @@ Processing runs in this order (the JI target depends on the root, so root estima
 3. **Peak search**: around each JI target `f_JI`, the bins in
    `[f_JI · 2^(−c/1200), f_JI · 2^(c/1200)]` (`c = evalRangeCents`, 50 in the paper)
    are searched for the maximum. If that maximum is below `evalThreshold` (dB),
-   the tone is reported as not detected (`null`).
-4. **Parabolic interpolation**: the peak bin and its two neighbours are converted
-   from dB to linear amplitude and fitted with a parabola to get a sub-bin
-   frequency estimate `f_peak`.
+   the tone is reported as not detected (`null`). Since the paper, two more
+   conditions also report `null`: the maximum is less than `evalMarginDb` above
+   the local noise floor, or the peak lies outside the window
+   (see [Changes after the paper](#changes-after-the-paper)).
+4. **Parabolic interpolation**: a parabola is fitted to the peak bin and its two
+   neighbours to get a sub-bin frequency estimate `f_peak`. The fit is done on the
+   dB values (`interpolationMode: "db"`, the default). The paper converts dB to
+   linear amplitude first (`interpolationMode: "linear"`).
 5. **Cent deviation**: `1200 · log2(f_peak / f_JI)`. A normalized value
    (`centDeviation / evalRangeCents`, clipped to −1…1) is also returned.
 
@@ -55,9 +63,11 @@ Processing runs in this order (the JI target depends on the root, so root estima
 | `src/calcJustFreq.ts` | JI / 12-TET target frequencies and their cent differences |
 | `src/peakInterpolation.ts` | Parabolic interpolation (used by `evaluateSpectrum`); spectral centroid as an alternative |
 | `src/rootEstimation.ts` | Chord root estimation from pitch classes |
-| `src/constants.ts` | A4 default (442 Hz), pitch names, pitch classes, chord definitions, octave range, JI ratios |
+| `src/constants.ts` | A4 default (442 Hz), pitch names, pitch classes, chord definitions, octave range, JI ratios, detection constants |
 | `src/types.ts` | `Pitch` type and its zod schema (`FormSchema`) |
 | `__tests__/` | Unit tests (vitest) |
+| `__tests__/helpers/analyserNodeSim.ts` | Test helper that reproduces `AnalyserNode.getFloatFrequencyData()` from synthetic signals |
+| `__tests__/helpers/legacyEvaluateSpectrum.ts` | Frozen copy of the pre-revision implementation, used as the regression reference |
 
 Files for chord tone detection are listed in [Chord tone detection](#chord-tone-detection-not-in-the-paper).
 
@@ -121,8 +131,57 @@ for (const [i, r] of results.entries()) {
 `evaluateSpectrum(spec, freq, pitchNameList, evalRangeCents, a4Freq, evalThreshold, options?)`
 returns one `EvaluationResult` per input tone, in input order. Tones with
 `enabled: false` return `null`. If the chord does not have exactly one root,
-the result is an empty array. Pass `{ includeDebug: true }` as `options` to also
-get the search range and peak bin of each tone.
+the result is an empty array.
+
+Options:
+
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `evalMarginDb` | `15` | A tone counts as sounding only if its peak is at least this many dB above the local noise floor. `null` restores the pre-revision decision (absolute threshold only, and out-of-window peaks are not rejected) |
+| `interpolationMode` | `"db"` | Amplitude scale used for the parabolic fit: `"db"` or `"linear"` (pre-revision) |
+| `includeDebug` | `false` | Also return the search range and peak bin of each tone |
+
+Each `EvaluationResult` holds:
+
+| Field | Meaning |
+|-------|---------|
+| `deviation`, `centDeviation` | Deviation from the JI target, or `null` if not detected |
+| `peakDb` | Level of the strongest bin in the search window (dB) |
+| `noiseFloorDb` | Local noise floor estimate (dB), or `null` if it cannot be estimated |
+| `isOutOfRange` | A component was found outside the ±`evalRangeCents` window (the tone is more than `evalRangeCents` off) |
+| `isAmbiguous` | A 2nd–8th harmonic of another chord tone falls inside this tone's window and may be picked up instead |
+| `lowResolution` | One FFT bin is wider than 20 cent at this pitch |
+
+## Changes after the paper
+
+`evaluateSpectrum` was evaluated on synthetic signals passed through a
+reproduction of `AnalyserNode` (Blackman window, `|X|/N`, time smoothing, dB)
+and on ensemble recordings. Five weaknesses were found and addressed.
+Conditions: 48 kHz, `fftSize` 32768, `evalRangeCents` 50, `evalThreshold` −100 dB.
+
+| # | Weakness | Change |
+|---|----------|--------|
+| 1 | A tone that is not played still gets a value. `evalThreshold` is usually below the noise floor, so the window maximum always passes | Estimate the local noise floor as the median dB of the bins within ±4 semitones of the target (excluding the search windows of all chord tones plus the main-lobe width) and require `peak ≥ floor + evalMarginDb` |
+| 2 | A tone more than ±50 cent off is reported with a value near ±50 cent, taken from the skirt of its main lobe at the window edge | Report `null` unless the window maximum is a local maximum of the whole spectrum and its interpolated frequency lies inside the window. Set `isOutOfRange` |
+| 3 | Fitting the parabola on linear amplitude is biased for the Blackman window (up to 1.1 cent for a single tone at 98 Hz and above) | Fit on dB values (`interpolationMode: "db"`); the bias drops below 0.2 cent |
+| 4 | A harmonic of another part inside the window is picked up when it is at least as loud as the target | Not solved; flagged with `isAmbiguous` |
+| 5 | Below about 126 Hz one bin is wider than 20 cent, so nearby components cannot be separated | Not solved (`fftSize` 32768 is the maximum of `AnalyserNode`); flagged with `lowResolution` |
+
+Details of the decision:
+
+- **Noise floor** (`estimateLocalNoiseFloorDb`): bins inside any chord tone's
+  search window (widened by 3 bins, the half-width of the Blackman main lobe) are
+  left out of the median, so that the chord tones themselves do not raise the
+  estimate. If fewer than 5 bins remain (small `fftSize`, or dense chords in a low
+  register), the floor is reported as `null` and only `evalThreshold` is applied.
+- **Out of range**: a window-edge bin is accepted when it is a true local maximum.
+  When nothing in the window is detected, the band from the window edge out to
+  ±100 cent is also checked; a component there that passes the detection decision
+  sets `isOutOfRange`. The band never reaches into another chord tone's window.
+- **Reproducing the paper**: pass `{ interpolationMode: "linear", evalMarginDb: null }`.
+  The output then matches the pre-revision implementation exactly
+  (checked against a frozen copy in `__tests__/justAnalyze.detection.test.ts`).
+  `isOutOfRange` is still set in this mode, but the value is reported as before.
 
 Pitch names are `C C# D Eb E F F# G G# A Bb B`; octaves are 1–6.
 

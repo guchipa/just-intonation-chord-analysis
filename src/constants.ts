@@ -107,3 +107,68 @@ export const JUST_RATIOS: number[] = [
   15 / 8,
 ];
 
+
+// --- 純正律偏差の計測 (evaluateSpectrum) の検出判定 ---
+
+/**
+ * 局所ノイズフロアの推定に使う範囲 (半音)。
+ * 目標周波数 ±この半音数に入るビンの dB 値の中央値をノイズフロアとする
+ * (構成音の探索窓 + 主ローブ幅のビンは除く)
+ */
+export const NOISE_FLOOR_RANGE_SEMITONES = 4;
+
+/**
+ * 局所ノイズフロアの推定に必要な最小ビン数。
+ * 構成音の探索窓を除いた残りがこれに満たないとき (fftSize が小さい・低音域で和音が密) は
+ * 推定不能として、ノイズフロア基準の判定を行わない (絶対値のしきい値だけで判定する)
+ */
+export const NOISE_FLOOR_MIN_BINS = 5;
+
+/**
+ * 窓関数の主ローブの半幅 (ビン)。AnalyserNode の Blackman 窓は主ローブが ±3 ビン。
+ * 正弦波 1 本のエネルギーは、ピーク位置からこのビン数の範囲に集中する
+ */
+export const MAIN_LOBE_HALF_WIDTH_BINS = 3;
+
+/**
+ * 検出マージンの既定値 (dB)。
+ * 探索窓内のピークが「局所ノイズフロア + この値」以上のときだけ鳴っていると判定する。
+ * 絶対値のしきい値 (evalThreshold) だけでは、ノイズフロアがしきい値より高い環境で
+ * 鳴っていない構成音にも偏差を出してしまうため、ノイズフロア基準の判定を併用する
+ */
+export const EVAL_MARGIN_DB_DEFAULT = 15;
+
+/**
+ * 範囲外判定のガード帯 (セント)。
+ * 探索窓 (±evalRangeCents) の外側、目標周波数 ±この値までを調べ、検出判定を満たす成分が
+ * あれば「探索窓の外にずれて鳴っている」と判定する (isOutOfRange)。
+ * 100 セント = 半音。これより離れた成分は別の音とみなす
+ */
+export const OUT_OF_RANGE_GUARD_CENTS = 100;
+
+/**
+ * パラボラ補間 (quadraticInterpolation) をどの尺度の振幅で行うか。
+ * - "db": dB 値 (対数振幅) のまま 3 点に放物線を当てる。窓関数の主ローブは対数振幅で
+ *   放物線に近く、AnalyserNode の Blackman 窓ではこちらの偏りが小さい
+ * - "linear": dB を線形振幅に戻してから当てる (見直し前の方式)。ピークがビンの中間に
+ *   あるほど偏りが大きく、周波数ごとに符号の違う系統誤差が出る
+ */
+export const INTERPOLATION_MODES = ["db", "linear"] as const;
+export type InterpolationMode = (typeof INTERPOLATION_MODES)[number];
+export const INTERPOLATION_MODE_DEFAULT: InterpolationMode = "db";
+
+/**
+ * 倍音干渉の判定で調べる倍音次数の範囲 (第 2〜第 8 倍音)。
+ * 他の構成音のこの次数の倍音が自分の探索窓に入る構成音は、倍音を自分の音と
+ * 取り違える可能性がある (isAmbiguous)
+ */
+export const HARMONIC_INTERFERENCE_MIN_ORDER = 2;
+export const HARMONIC_INTERFERENCE_MAX_ORDER = 8;
+
+/**
+ * 低分解能の警告を出すビン幅 (セント)。
+ * 構成音の期待周波数で 1 ビンの幅 (セント換算) がこの値を超えると、探索窓
+ * (±evalRangeCents) に入るビンが数個しかなく、近接する成分を分離できない (lowResolution)。
+ * 48 kHz / fftSize 32768 (ビン幅 1.46 Hz) では約 126 Hz 未満 (B2 以下) が該当する
+ */
+export const LOW_RESOLUTION_BIN_CENTS = 20;
