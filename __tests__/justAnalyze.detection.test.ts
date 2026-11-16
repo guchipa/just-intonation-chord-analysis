@@ -9,14 +9,18 @@
 import { getJustFrequencies } from "../src/calcJustFreq";
 import {
   EVAL_MARGIN_DB_DEFAULT,
+  LOW_RESOLUTION_BIN_CENTS,
   NOISE_FLOOR_MIN_BINS,
   NOISE_FLOOR_RANGE_SEMITONES,
 } from "../src/constants";
 import {
   estimateLocalNoiseFloorDb,
   evaluateSpectrum,
+  binWidthCents,
   findHarmonicInterference,
   getHarmonicInterference,
+  getLowResolutionFlags,
+  isLowResolution,
 } from "../src/justAnalyze";
 import type { EvaluateSpectrumOptions } from "../src/justAnalyze";
 import type { Pitch } from "../src/types";
@@ -658,5 +662,70 @@ describe("evaluateSpectrum: 倍音干渉の警告 (isAmbiguous)", () => {
     // アルゴリズムは変えていないので取り違えは起きる。フラグで利用側に知らせる
     expect(Math.abs(g.centDeviation!)).toBeLessThan(2);
     expect(g.isAmbiguous).toBe(true);
+  });
+});
+
+describe("evaluateSpectrum: 低分解能の警告 (lowResolution)", () => {
+  const BIN_HZ = SAMPLE_RATE / FFT_SIZE;
+
+  it("しきい値はビン幅 20 セント", () => {
+    expect(LOW_RESOLUTION_BIN_CENTS).toBe(20);
+  });
+
+  it("C2 を含む構成音リスト: C2 が lowResolution=true になる", () => {
+    const list = [pitch("C", 2, true), pitch("G", 3), pitch("E", 4)];
+    const freqs = getJustFrequencies(list, A4);
+    const spec = simulate(freqs.map((freqHz) => ({ freqHz, peakDb: TONE_DB })));
+    const result = evaluate(spec, list);
+    expect(result.map((r) => r.lowResolution)).toEqual([true, false, false]);
+    // 警告であり、値は出す
+    expect(result[0].centDeviation).not.toBeNull();
+    expect(getLowResolutionFlags(list, A4, BIN_HZ)).toEqual([true, false, false]);
+  });
+
+  it("48 kHz / fftSize 32768 では B2 以下が該当し、C3 以上は該当しない", () => {
+    const names: [string, number, boolean][] = [
+      ["G", 2, true],
+      ["Bb", 2, true],
+      ["B", 2, true],
+      ["C", 3, false],
+      ["C", 4, false],
+    ];
+    for (const [name, octave, expected] of names) {
+      const list = [pitch(name, octave, true)];
+      const [f0] = getJustFrequencies(list, A4);
+      expect(isLowResolution(f0, BIN_HZ)).toBe(expected);
+      expect(evaluate(simulate([]), list)[0].lowResolution).toBe(expected);
+    }
+    // B2 (124.0 Hz) は 20.3 セント、C3 (131.4 Hz) は 19.2 セント
+    expect(binWidthCents(124.0, BIN_HZ)).toBeCloseTo(20.3, 1);
+    expect(binWidthCents(131.4, BIN_HZ)).toBeCloseTo(19.2, 1);
+  });
+
+  it("fftSize が小さいほど高い音まで該当する", () => {
+    const list = [pitch("C", 4, true), pitch("C", 5)];
+    const [c4, c5] = getJustFrequencies(list, A4);
+    // fftSize 8192: ビン幅 5.86 Hz → C4 は 38 セント、C5 は 19 セント
+    const binHz = SAMPLE_RATE / 8192;
+    expect(isLowResolution(c4, binHz)).toBe(true);
+    expect(isLowResolution(c5, binHz)).toBe(false);
+
+    const smallFreq = makeFreqBins(SAMPLE_RATE, 8192);
+    const spec = simulateAnalyserSpectrum({
+      sampleRate: SAMPLE_RATE,
+      fftSize: 8192,
+      smoothingTimeConstant: SMOOTHING,
+      tones: [{ freqHz: c4, peakDb: TONE_DB }],
+      noiseFloorDb: NOISE_DB,
+    });
+    const result = evaluateSpectrum(spec, smallFreq, list, EVAL_RANGE_CENTS, A4, EVAL_THRESHOLD);
+    expect(result.map((r) => r.lowResolution)).toEqual([true, false]);
+  });
+
+  it("計測対象外の音は false。根音が未設定のリストは全要素 false", () => {
+    const list = [pitch("C", 4, true), { ...pitch("C", 2), enabled: false }];
+    expect(evaluate(simulate([]), list)[1].lowResolution).toBe(false);
+    expect(getLowResolutionFlags([pitch("C", 2)], A4, BIN_HZ)).toEqual([false]);
+    expect(isLowResolution(0, BIN_HZ)).toBe(false);
   });
 });

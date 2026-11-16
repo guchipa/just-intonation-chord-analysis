@@ -4,6 +4,7 @@ import {
   HARMONIC_INTERFERENCE_MAX_ORDER,
   HARMONIC_INTERFERENCE_MIN_ORDER,
   INTERPOLATION_MODE_DEFAULT,
+  LOW_RESOLUTION_BIN_CENTS,
   MAIN_LOBE_HALF_WIDTH_BINS,
   NOISE_FLOOR_MIN_BINS,
   NOISE_FLOOR_RANGE_SEMITONES,
@@ -42,6 +43,14 @@ export interface EvaluationResult {
    * スペクトルには依存しない。計測対象外 (enabled=false) の音は false
    */
   isAmbiguous: boolean;
+
+  /**
+   * この音の高さで FFT の 1 ビンの幅 (セント換算) が LOW_RESOLUTION_BIN_CENTS を
+   * 超えるとき true。探索窓に入るビンが少なく、近接する成分 (隣の構成音・倍音) を
+   * 分離できないため、偏差の信頼性が下がる。fftSize・サンプリング周波数と音の高さだけで
+   * 決まり、スペクトルには依存しない。計測対象外 (enabled=false) の音は false
+   */
+  lowResolution: boolean;
 
   /**
    * 探索窓内の最大ビンのレベル (dB)。
@@ -90,6 +99,46 @@ export interface EvaluateSpectrumOptions {
    * 省略時は INTERPOLATION_MODE_DEFAULT ("db")。"linear" は見直し前の方式
    */
   interpolationMode?: InterpolationMode;
+}
+
+/**
+ * 周波数 freqHz の位置で、FFT の 1 ビンの幅をセントに換算する。
+ * @param freqHz 音の周波数 (Hz)
+ * @param binWidthHz ビン幅 (Hz) = サンプリング周波数 / fftSize
+ */
+export function binWidthCents(freqHz: number, binWidthHz: number): number {
+  return 1200 * Math.log2(1 + binWidthHz / freqHz);
+}
+
+/**
+ * 周波数 freqHz の音が低分解能 (ビン幅が LOW_RESOLUTION_BIN_CENTS セントを超える) かを返す
+ */
+export function isLowResolution(freqHz: number, binWidthHz: number): boolean {
+  return (
+    freqHz > 0 &&
+    binWidthHz > 0 &&
+    binWidthCents(freqHz, binWidthHz) > LOW_RESOLUTION_BIN_CENTS
+  );
+}
+
+/**
+ * 構成音リストの各音が低分解能かを返す (UI での事前表示用)。
+ * 根音が未設定などで期待周波数を計算できないときは、全要素 false を返す
+ */
+export function getLowResolutionFlags(
+  pitchNameList: Pitch[],
+  a4Freq: number,
+  binWidthHz: number
+): boolean[] {
+  // 根音が 1 つでないと getJustFrequencies がエラーを出力するので先に弾く
+  if (pitchNameList.filter((p) => p.isRoot).length !== 1) {
+    return pitchNameList.map(() => false);
+  }
+  const estFreqs = getJustFrequencies(pitchNameList, a4Freq);
+  if (estFreqs.length !== pitchNameList.length) {
+    return pitchNameList.map(() => false);
+  }
+  return estFreqs.map((f) => isLowResolution(f, binWidthHz));
 }
 
 /** 倍音干渉の内容: どの構成音の第何倍音が探索窓に入るか */
@@ -404,6 +453,7 @@ export function evaluateSpectrum(
         centDeviation: null,
         isOutOfRange: false,
         isAmbiguous: false,
+        lowResolution: false,
         peakDb: null,
         noiseFloorDb: null,
       });
@@ -440,6 +490,8 @@ export function evaluateSpectrum(
     const rangeMaxIdxApprox =
       targetIdx + Math.ceil((maxFreq - targetFreq) / freqStep);
 
+    const lowResolution = isLowResolution(est_f, freqStep);
+
     // 探索窓は [evalRangeMin, evalRangeMax)
     const evalRangeMin = Math.max(0, rangeMinIdxApprox);
     const evalRangeMax = Math.min(spec.length, rangeMaxIdxApprox);
@@ -457,6 +509,7 @@ export function evaluateSpectrum(
         centDeviation: null,
         isOutOfRange: false,
         isAmbiguous: interference[i] !== null,
+        lowResolution,
         peakDb: null,
         noiseFloorDb: null,
       };
@@ -543,6 +596,7 @@ export function evaluateSpectrum(
       centDeviation: null,
       isOutOfRange,
       isAmbiguous: interference[i] !== null,
+      lowResolution,
       peakDb: maxVal,
       noiseFloorDb,
     };

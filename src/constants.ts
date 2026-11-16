@@ -164,3 +164,11 @@ export const INTERPOLATION_MODE_DEFAULT: InterpolationMode = "db";
  */
 export const HARMONIC_INTERFERENCE_MIN_ORDER = 2;
 export const HARMONIC_INTERFERENCE_MAX_ORDER = 8;
+
+/**
+ * 低分解能の警告を出すビン幅 (セント)。
+ * 構成音の期待周波数で 1 ビンの幅 (セント換算) がこの値を超えると、探索窓
+ * (±evalRangeCents) に入るビンが数個しかなく、近接する成分を分離できない (lowResolution)。
+ * 48 kHz / fftSize 32768 (ビン幅 1.46 Hz) では約 126 Hz 未満 (B2 以下) が該当する
+ */
+export const LOW_RESOLUTION_BIN_CENTS = 20;
