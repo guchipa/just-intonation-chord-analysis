@@ -68,7 +68,7 @@ describe("simulateAnalyserSpectrum (AnalyserNode 再現ヘルパー)", () => {
 });
 
 describe("legacyEvaluateSpectrum (旧実装の凍結コピー)", () => {
-  it("見直し前の evaluateSpectrum と同じ出力を返す", () => {
+  it("旧挙動に切り替えた evaluateSpectrum と同じ出力を返す", () => {
     const freq = makeFreqBins(48000, 32768);
     const pitchList: Pitch[] = [
       { pitchName: "C", octaveNum: 4, isRoot: true, enabled: true },
@@ -85,7 +85,9 @@ describe("legacyEvaluateSpectrum (旧実装の凍結コピー)", () => {
       ],
       noiseFloorDb: -90,
     });
-    const current = evaluateSpectrum(spec, freq, pitchList, 50, 442, -100);
+    const current = evaluateSpectrum(spec, freq, pitchList, 50, 442, -100, {
+      evalMarginDb: null,
+    });
     const legacy = legacyEvaluateSpectrum(spec, freq, pitchList, 50, 442, -100);
     expect(legacy).toEqual(
       current.map((r) => ({
