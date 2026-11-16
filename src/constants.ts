@@ -156,3 +156,11 @@ export const OUT_OF_RANGE_GUARD_CENTS = 100;
 export const INTERPOLATION_MODES = ["db", "linear"] as const;
 export type InterpolationMode = (typeof INTERPOLATION_MODES)[number];
 export const INTERPOLATION_MODE_DEFAULT: InterpolationMode = "db";
+
+/**
+ * 倍音干渉の判定で調べる倍音次数の範囲 (第 2〜第 8 倍音)。
+ * 他の構成音のこの次数の倍音が自分の探索窓に入る構成音は、倍音を自分の音と
+ * 取り違える可能性がある (isAmbiguous)
+ */
+export const HARMONIC_INTERFERENCE_MIN_ORDER = 2;
+export const HARMONIC_INTERFERENCE_MAX_ORDER = 8;

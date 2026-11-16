@@ -12,7 +12,12 @@ import {
   NOISE_FLOOR_MIN_BINS,
   NOISE_FLOOR_RANGE_SEMITONES,
 } from "../src/constants";
-import { estimateLocalNoiseFloorDb, evaluateSpectrum } from "../src/justAnalyze";
+import {
+  estimateLocalNoiseFloorDb,
+  evaluateSpectrum,
+  findHarmonicInterference,
+  getHarmonicInterference,
+} from "../src/justAnalyze";
 import type { EvaluateSpectrumOptions } from "../src/justAnalyze";
 import type { Pitch } from "../src/types";
 import {
@@ -574,5 +579,84 @@ describe("evaluateSpectrum: 旧挙動の再現 (interpolationMode='linear' か�
     ]);
     expect(legacy(spec, triad)[1].centDeviation).not.toBeNull();
     expect(evaluate(spec, triad)[1].centDeviation).toBeNull();
+  });
+});
+
+describe("evaluateSpectrum: 倍音干渉の警告 (isAmbiguous)", () => {
+  it("根音 C3 と G4: G4 に C3 の第 3 倍音が重なる", () => {
+    const list = [pitch("C", 3, true), pitch("G", 4)];
+    const [c3, g4] = getJustFrequencies(list, A4);
+    expect(c3 * 3).toBeCloseTo(g4, 6);
+
+    const spec = simulate([
+      { freqHz: c3, peakDb: TONE_DB },
+      { freqHz: g4, peakDb: TONE_DB },
+    ]);
+    const result = evaluate(spec, list);
+    expect(result[0].isAmbiguous).toBe(false);
+    expect(result[1].isAmbiguous).toBe(true);
+    expect(getHarmonicInterference(list, A4, EVAL_RANGE_CENTS)).toEqual([
+      null,
+      { sourceIndex: 0, harmonic: 3 },
+    ]);
+  });
+
+  it("根音 C3 と C4 (オクターブ重複): C4 に C3 の第 2 倍音が重なる", () => {
+    const list = [pitch("C", 3, true), pitch("C", 4)];
+    const result = evaluate(simulate([]), list);
+    expect(result.map((r) => r.isAmbiguous)).toEqual([false, true]);
+    expect(getHarmonicInterference(list, A4, EVAL_RANGE_CENTS)[1]).toEqual({
+      sourceIndex: 0,
+      harmonic: 2,
+    });
+  });
+
+  it("1 オクターブ内の三和音には倍音干渉がない", () => {
+    const list = [pitch("C", 4, true), pitch("E", 4), pitch("G", 4)];
+    const result = evaluate(simulate([]), list);
+    expect(result.map((r) => r.isAmbiguous)).toEqual([false, false, false]);
+  });
+
+  it("探索窓の幅で判定が変わる (C3 の第 7 倍音と純正律の Bb5 は 27 セント差)", () => {
+    const list = [pitch("C", 3, true), pitch("Bb", 5)];
+    const [c3, bb5] = getJustFrequencies(list, A4);
+    expect(1200 * Math.log2((c3 * 7) / bb5)).toBeCloseTo(-27.3, 1);
+    expect(getHarmonicInterference(list, A4, 50)[1]).toEqual({ sourceIndex: 0, harmonic: 7 });
+    expect(getHarmonicInterference(list, A4, 20)[1]).toBeNull();
+  });
+
+  it("第 8 倍音までを調べ、第 9 倍音以上・基音どうしは対象にしない", () => {
+    expect(findHarmonicInterference([100, 800], 50)[1]).toEqual({ sourceIndex: 0, harmonic: 8 });
+    expect(findHarmonicInterference([100, 900], 50)[1]).toBeNull();
+    // 同じ高さの 2 音 (基音どうし) は倍音干渉ではない
+    expect(findHarmonicInterference([100, 100], 50)).toEqual([null, null]);
+  });
+
+  it("計測対象外の音も干渉源になる。計測対象外の音自身は false", () => {
+    const list = [{ ...pitch("C", 3, true), enabled: false }, pitch("G", 4)];
+    expect(evaluate(simulate([]), list).map((r) => r.isAmbiguous)).toEqual([false, true]);
+
+    const disabledTarget = [pitch("C", 3, true), { ...pitch("G", 4), enabled: false }];
+    expect(evaluate(simulate([]), disabledTarget).map((r) => r.isAmbiguous)).toEqual([false, false]);
+  });
+
+  it("根音が未設定のリストでは全要素 null (エラーにしない)", () => {
+    const list = [pitch("C", 3), pitch("G", 4)];
+    expect(getHarmonicInterference(list, A4, EVAL_RANGE_CENTS)).toEqual([null, null]);
+  });
+
+  it("警告の対象: 同じ音量の倍音が重なると、ずれた基音ではなく倍音を捕捉する", () => {
+    // G4 を +20 セントで演奏。C3 の第 3 倍音 (純正な G4 の位置) が同じ音量で鳴っている
+    const list = [pitch("C", 3, true), pitch("G", 4)];
+    const [c3, g4] = getJustFrequencies(list, A4);
+    const spec = simulate([
+      { freqHz: c3, peakDb: TONE_DB },
+      { freqHz: c3 * 3, peakDb: TONE_DB + 1 },
+      { freqHz: detune(g4, 20), peakDb: TONE_DB },
+    ]);
+    const g = evaluate(spec, list)[1];
+    // アルゴリズムは変えていないので取り違えは起きる。フラグで利用側に知らせる
+    expect(Math.abs(g.centDeviation!)).toBeLessThan(2);
+    expect(g.isAmbiguous).toBe(true);
   });
 });

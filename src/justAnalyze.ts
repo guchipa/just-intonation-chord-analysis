@@ -1,6 +1,8 @@
 import { getJustFrequencies } from "./calcJustFreq";
 import {
   EVAL_MARGIN_DB_DEFAULT,
+  HARMONIC_INTERFERENCE_MAX_ORDER,
+  HARMONIC_INTERFERENCE_MIN_ORDER,
   INTERPOLATION_MODE_DEFAULT,
   MAIN_LOBE_HALF_WIDTH_BINS,
   NOISE_FLOOR_MIN_BINS,
@@ -32,6 +34,14 @@ export interface EvaluationResult {
    * 見直し前と同じ値を出したまま、このフラグだけを立てる)
    */
   isOutOfRange: boolean;
+
+  /**
+   * 他の構成音の倍音 (第 2〜第 8) がこの音の探索窓に入るとき true。
+   * 倍音が自分の音と同じかそれ以上の音量だと、倍音の方を捕捉して偏差を取り違える
+   * 可能性がある (例: 根音 C3 に対する G4・C4)。構成音リストだけで決まり、
+   * スペクトルには依存しない。計測対象外 (enabled=false) の音は false
+   */
+  isAmbiguous: boolean;
 
   /**
    * 探索窓内の最大ビンのレベル (dB)。
@@ -80,6 +90,69 @@ export interface EvaluateSpectrumOptions {
    * 省略時は INTERPOLATION_MODE_DEFAULT ("db")。"linear" は見直し前の方式
    */
   interpolationMode?: InterpolationMode;
+}
+
+/** 倍音干渉の内容: どの構成音の第何倍音が探索窓に入るか */
+export interface HarmonicInterference {
+  /** 干渉する側の構成音のインデックス (構成音リスト内) */
+  sourceIndex: number;
+  /** 倍音次数 (2〜8) */
+  harmonic: number;
+}
+
+/**
+ * 倍音干渉の組合せを求める。
+ * 各構成音について、他の構成音の第 2〜第 8 倍音が自分の探索窓 (±evalRangeCents) に
+ * 入るかを調べ、入るものがあれば最初に見つかった 1 つを返す。
+ *
+ * @param estFreqs 各構成音の期待周波数 (Hz)
+ * @param evalRangeCents 探索窓の半幅 (セント)
+ * @returns 構成音ごとの干渉内容。干渉がなければ null
+ */
+export function findHarmonicInterference(
+  estFreqs: number[],
+  evalRangeCents: number
+): (HarmonicInterference | null)[] {
+  const ratio = 2 ** (evalRangeCents / 1200);
+  return estFreqs.map((target, i) => {
+    const lo = target / ratio;
+    const hi = target * ratio;
+    for (let j = 0; j < estFreqs.length; j++) {
+      if (j === i) continue;
+      const source = estFreqs[j];
+      if (!(source > 0)) continue;
+      for (
+        let harmonic = HARMONIC_INTERFERENCE_MIN_ORDER;
+        harmonic <= HARMONIC_INTERFERENCE_MAX_ORDER;
+        harmonic++
+      ) {
+        const harmonicFreq = source * harmonic;
+        if (harmonicFreq > hi) break;
+        if (harmonicFreq >= lo) return { sourceIndex: j, harmonic };
+      }
+    }
+    return null;
+  });
+}
+
+/**
+ * 構成音リストから倍音干渉の組合せを求める (UI での事前表示用)。
+ * 根音が未設定などで期待周波数を計算できないときは、全要素 null を返す
+ */
+export function getHarmonicInterference(
+  pitchNameList: Pitch[],
+  a4Freq: number,
+  evalRangeCents: number
+): (HarmonicInterference | null)[] {
+  // 根音が 1 つでないと getJustFrequencies がエラーを出力するので先に弾く
+  if (pitchNameList.filter((p) => p.isRoot).length !== 1) {
+    return pitchNameList.map(() => null);
+  }
+  const estFreqs = getJustFrequencies(pitchNameList, a4Freq);
+  if (estFreqs.length !== pitchNameList.length) {
+    return pitchNameList.map(() => null);
+  }
+  return findHarmonicInterference(estFreqs, evalRangeCents);
 }
 
 /** 中央値計算の作業用バッファ (毎フレームの確保を避けるため使い回す) */
@@ -315,6 +388,9 @@ export function evaluateSpectrum(
   // ノイズフロア推定から除くビン範囲 (計測対象外の音も鳴っている前提で含める)
   const toneBinRanges = buildToneBinRanges(estFreqs, freq, evalRangeCents);
 
+  // 倍音干渉 (構成音リストだけで決まる)
+  const interference = findHarmonicInterference(estFreqs, evalRangeCents);
+
   const evalList: EvaluationResult[] = [];
 
   for (let i = 0; i < estFreqs.length; i++) {
@@ -327,6 +403,7 @@ export function evaluateSpectrum(
         deviation: null,
         centDeviation: null,
         isOutOfRange: false,
+        isAmbiguous: false,
         peakDb: null,
         noiseFloorDb: null,
       });
@@ -379,6 +456,7 @@ export function evaluateSpectrum(
         deviation: null,
         centDeviation: null,
         isOutOfRange: false,
+        isAmbiguous: interference[i] !== null,
         peakDb: null,
         noiseFloorDb: null,
       };
@@ -464,6 +542,7 @@ export function evaluateSpectrum(
       deviation: null,
       centDeviation: null,
       isOutOfRange,
+      isAmbiguous: interference[i] !== null,
       peakDb: maxVal,
       noiseFloorDb,
     };
